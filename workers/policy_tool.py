@@ -117,18 +117,67 @@ def analyze_policy(task: str, chunks: list) -> dict:
     if "31/01" in task_lower or "30/01" in task_lower or "trước 01/02" in task_lower:
         policy_version_note = "Đơn hàng đặt trước 01/02/2026 áp dụng chính sách v3 (không có trong tài liệu hiện tại)."
 
-    # TODO Sprint 2: Gọi LLM để phân tích phức tạp hơn
-    # Ví dụ:
-    # from openai import OpenAI
-    # client = OpenAI()
-    # response = client.chat.completions.create(
-    #     model="gpt-4o-mini",
-    #     messages=[
-    #         {"role": "system", "content": "Bạn là policy analyst. Dựa vào context, xác định policy áp dụng và các exceptions."},
-    #         {"role": "user", "content": f"Task: {task}\n\nContext:\n" + "\n".join([c['text'] for c in chunks])}
-    #     ]
-    # )
-    # analysis = response.choices[0].message.content
+    # --- LLM-based refinement (xử lý negation và edge cases mà rule-based bỏ sót) ---
+    explanation = "Analyzed via rule-based policy check."
+    llm_exceptions = []
+
+    if chunks and os.getenv("OPENAI_API_KEY"):
+        try:
+            import json as _json
+            from openai import OpenAI
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+            context_str = "\n".join([f"[{c.get('source','')}] {c.get('text','')}" for c in chunks])
+
+            system_prompt = (
+                "Bạn là policy analyst cho hệ thống CS nội bộ. "
+                "Dựa HOÀN TOÀN vào context được cung cấp, xác định các exception hoàn tiền áp dụng.\n"
+                "Chú ý xử lý negation: 'không phải Flash Sale' → KHÔNG phải exception.\n\n"
+                "Trả về JSON với format:\n"
+                '{"exceptions": [{"type": str, "rule": str}], "policy_applies": bool, "note": str}\n'
+                "Nếu không có exception nào → exceptions=[]\n"
+                "KHÔNG bịa rule không có trong context."
+            )
+            user_prompt = (
+                f"Câu hỏi: {task}\n\n"
+                f"Context từ tài liệu:\n{context_str}\n\n"
+                "Liệt kê các exception hoàn tiền áp dụng (nếu có)."
+            )
+
+            resp = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+
+            llm_result = _json.loads(resp.choices[0].message.content or "{}")
+            llm_exceptions = llm_result.get("exceptions", [])
+
+            # LLM override: dùng kết quả LLM thay rule-based nếu LLM trả về
+            exceptions_found = [
+                {
+                    "type": ex.get("type", "llm_detected_exception"),
+                    "rule": ex.get("rule", ""),
+                    "source": "policy_refund_v4.txt",
+                }
+                for ex in llm_exceptions
+            ]
+            policy_applies = len(exceptions_found) == 0
+
+            # Lấy note từ LLM nếu có (e.g., temporal scoping)
+            llm_note = llm_result.get("note", "")
+            if llm_note and not policy_version_note:
+                policy_version_note = llm_note
+
+            explanation = "Analyzed via LLM-based policy check (gpt-4o-mini)."
+
+        except Exception as e:
+            # Fallback về rule-based nếu LLM fail
+            explanation = f"LLM call failed ({e}), using rule-based result."
 
     sources = list({c.get("source", "unknown") for c in chunks if c})
 
@@ -138,7 +187,7 @@ def analyze_policy(task: str, chunks: list) -> dict:
         "exceptions_found": exceptions_found,
         "source": sources,
         "policy_version_note": policy_version_note,
-        "explanation": "Analyzed via rule-based policy check. TODO: upgrade to LLM-based analysis.",
+        "explanation": explanation,
     }
 
 
@@ -187,6 +236,10 @@ def run(state: dict) -> dict:
             if mcp_result.get("output") and mcp_result["output"].get("chunks"):
                 chunks = mcp_result["output"]["chunks"]
                 state["retrieved_chunks"] = chunks
+                # Đồng thời update retrieved_sources
+                state["retrieved_sources"] = list({
+                    c.get("source", "unknown") for c in chunks
+                })
 
         # Step 2: Phân tích policy
         policy_result = analyze_policy(task, chunks)
