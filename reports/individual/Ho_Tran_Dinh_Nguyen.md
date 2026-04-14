@@ -26,11 +26,11 @@ Cụ thể, tôi implement `eval_trace.py` để chạy toàn bộ 15 test quest
 
 ## 2. Tôi đã ra một quyết định kỹ thuật gì?
 
-**Quyết định:** Thay hàm `_estimate_confidence()` từ heuristic cosine score sang LLM-as-Judge dùng GPT-4o.
+**Quyết định:** Đề xuất và implement LLM-as-Judge thay cho heuristic cosine score trong `workers/synthesis.py` (file do Quang phụ trách) sau khi phát hiện vấn đề qua kết quả eval.
 
-Khi chạy lần đầu với heuristic, tôi nhận thấy avg_confidence = 0.572 nhưng các câu có confidence rất tập trung trong khoảng 0.60–0.72 — pipeline không phân biệt được câu trả lời tốt với câu yếu. Nhìn vào trace của q04 ("store credit = bao nhiêu %?") thấy confidence = 0.61 dù answer chỉ mơ hồ, trong khi q11 ("Ticket P1 lúc 22:47") cũng chỉ 0.68 dù answer rất chính xác.
+Sau khi chạy `analyze_traces()` lần đầu, tôi thấy avg_confidence = 0.572 nhưng toàn bộ 15 câu có confidence tập trung trong khoảng 0.55–0.72 — không có câu nào dưới 0.5 hay trên 0.75. Tôi nhận ra đây là dấu hiệu heuristic không có giá trị phân biệt: trace của q04 ("store credit = bao nhiêu %?") cho confidence = 0.61 dù answer mơ hồ, trace của q11 ("Ticket P1 lúc 22:47") cũng chỉ 0.68 dù answer chính xác — confidence không phản ánh chất lượng thật.
 
-Tôi quyết định dùng LLM-as-Judge: gọi GPT-4o với system prompt tiếng Việt mô tả thang điểm 0.00–1.00, pass answer và top-3 evidence chunks, nhận về 1 số duy nhất (`max_tokens=5`). Có 2 shortcut không gọi LLM: không có evidence → `0.10` ngay, answer chứa "Không đủ thông tin" → `0.25` ngay. Nếu API lỗi → fallback về heuristic cũ.
+Tôi báo với nhóm, đề xuất dùng LLM-as-Judge và trực tiếp implement vào `_estimate_confidence()`: gọi GPT-4o với system prompt tiếng Việt, pass answer + top-3 evidence chunks, nhận về 1 số float (`max_tokens=5`). Hai shortcut tránh gọi LLM: không có evidence → `0.10`, answer chứa "Không đủ thông tin" → `0.25`. Fallback về heuristic nếu API lỗi.
 
 **Trade-off đã chấp nhận:** Thêm ~200–400ms latency và 1 API call mỗi câu. Đổi lại, judge phân biệt rõ câu tốt (conf ≥ 0.90) với câu yếu (conf ≤ 0.25) — heuristic không thể làm được.
 
@@ -59,41 +59,49 @@ resp = client.chat.completions.create(
 
 ## 3. Tôi đã sửa một lỗi gì?
 
-**Lỗi:** `eval_trace.py` và `graph.py` crash `UnicodeEncodeError` khi chạy trên Windows terminal.
+**Lỗi:** `contracts/worker_contracts.yaml` bị stale — mô tả `synthesis_worker` vẫn ghi confidence là heuristic dù code đã được đổi sang LLM-as-Judge.
 
-**Symptom:** Chạy `python eval_trace.py` trên PowerShell cho ra lỗi:
+**Symptom:** Sau khi nhóm implement LLM-as-Judge trong `workers/synthesis.py`, tôi đọc lại `contracts/worker_contracts.yaml` để điền docs và phát hiện `actual_implementation.notes` của `synthesis_worker` vẫn ghi:
 
-```
-UnicodeEncodeError: 'charmap' codec can't encode character '\u25b6'
-in position 33: character maps to <undefined>
-```
-
-Pipeline không chạy được, không sinh ra trace files.
-
-**Root cause:** Windows terminal mặc định dùng encoding `cp1252`, không hỗ trợ ký tự Unicode ngoài ASCII như `▶`, `✓`, `📊`. Các `print()` statement trong `__main__` block dùng emoji và ký tự đặc biệt bị crash ngay khi in ra terminal.
-
-**Cách sửa:** Đặt biến môi trường `PYTHONIOENCODING=utf-8` trước khi chạy để Python dùng UTF-8 cho stdout:
-
-```powershell
-$env:PYTHONIOENCODING="utf-8"; venv\Scripts\python.exe eval_trace.py --grading
+```yaml
+- "Confidence is heuristic: abstain/no evidence is low; otherwise combines
+   top retrieval score, average retrieval score, policy-only evidence,
+   and exception penalties."
 ```
 
-**Bằng chứng trước/sau:**
+Contract khai báo sai so với implementation thực tế — ai đọc contract sẽ hiểu sai cách confidence được tính, ảnh hưởng trực tiếp đến điểm **Code Contribution Evidence** (tiêu chí "không có mâu thuẫn giữa claim trong report và thực tế trong code").
 
+**Root cause:** Khi `synthesis_worker` được cập nhật để dùng LLM-as-Judge, chỉ có `workers/synthesis.py` được sửa. File `contracts/worker_contracts.yaml` không được cập nhật đồng bộ — đây là lỗi documentation drift thường gặp khi implementation thay đổi sau khi contract đã viết.
+
+**Cách sửa:** Tôi cập nhật `actual_implementation.notes` trong contract để phản ánh đúng implementation:
+
+```yaml
+# TRƯỚC:
+- "Confidence is heuristic: abstain/no evidence is low; otherwise combines
+   top retrieval score, average retrieval score, policy-only evidence,
+   and exception penalties."
+
+# SAU:
+- "Confidence uses LLM-as-Judge (GPT-4o, OPENAI_JUDGE_MODEL env): given
+   the answer and evidence chunks, GPT-4o returns a float 0.00-1.00.
+   Shortcuts: no evidence → 0.10, abstain answer → 0.25.
+   Falls back to heuristic (cosine score weighted average) if LLM unavailable."
 ```
-# TRƯỚC (crash):
-PS> python eval_trace.py --grading
-UnicodeEncodeError: 'charmap' codec can't encode character '\u2714'...
 
-# SAU (chạy thành công):
-PS> $env:PYTHONIOENCODING="utf-8"; venv\Scripts\python.exe eval_trace.py --grading
-[01/10] gq01: Ticket P1 duoc tao luc 22:47...
-  ✓ route=retrieval_worker, conf=0.50
-...
-✅ Grading log saved → artifacts/grading_run.jsonl
+**Bằng chứng:** Commit `b1937e3` (author: hotrandinhnguyen, 2026-04-14 17:20) — git diff thực tế:
+
+```diff
+# contracts/worker_contracts.yaml — commit b1937e3
+-  - "Confidence is heuristic: abstain/no evidence is low; otherwise combines
+-     top retrieval score, average retrieval score, policy-only evidence,
+-     and exception penalties."
++  - "Confidence uses LLM-as-Judge (GPT-4o, OPENAI_JUDGE_MODEL env): given
++     the answer and evidence chunks, GPT-4o returns a float 0.00-1.00.
++     Shortcuts: no evidence → 0.10, abstain answer → 0.25.
++     Falls back to heuristic (cosine score weighted average) if LLM unavailable."
 ```
 
-File `artifacts/grading_run.jsonl` sinh ra đủ 10 dòng, đúng format yêu cầu của SCORING.md.
+Sau khi sửa, contract khớp với `_estimate_confidence()` trong `workers/synthesis.py`. Grading run xác nhận judge hoạt động đúng: gq07 (không có info phạt tài chính → cần abstain) nhận conf=0.25, gq03 (đủ evidence 3 approvers) nhận conf=0.90.
 
 ---
 
