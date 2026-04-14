@@ -45,6 +45,7 @@ class AgentState(TypedDict):
     # Trace & history
     history: list                       # Lịch sử các bước đã qua
     workers_called: list                # Danh sách workers đã được gọi
+    worker_io_logs: list                # Log input/output của từng worker
     supervisor_route: str               # Worker được chọn bởi supervisor
     latency_ms: Optional[int]           # Thời gian xử lý (ms)
     run_id: str                         # ID của run này
@@ -67,9 +68,10 @@ def make_initial_state(task: str) -> AgentState:
         "confidence": 0.0,
         "history": [],
         "workers_called": [],
+        "worker_io_logs": [],
         "supervisor_route": "",
         "latency_ms": None,
-        "run_id": f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        "run_id": f"run_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}",
     }
 
 
@@ -103,17 +105,32 @@ def supervisor_node(state: AgentState) -> AgentState:
     risk_high = False
 
     # Ví dụ routing cơ bản — nhóm phát triển thêm:
-    policy_keywords = ["hoàn tiền", "refund", "flash sale", "license", "cấp quyền", "access", "level 3"]
+    policy_keywords = [
+        "hoàn tiền", "refund", "flash sale", "license", "subscription",
+        "cấp quyền", "quyền", "access", "level 2", "level 3", "level 4",
+        "admin access", "contractor",
+    ]
+    retrieval_keywords = ["p1", "sla", "ticket", "escalation", "remote", "vpn", "mật khẩu", "password"]
     risk_keywords = ["emergency", "khẩn cấp", "2am", "không rõ", "err-"]
 
-    if any(kw in task for kw in policy_keywords):
-        route = "policy_tool_worker"
-        route_reason = f"task contains policy/access keyword"
-        needs_tool = True
+    policy_hits = [kw for kw in policy_keywords if kw in task]
+    retrieval_hits = [kw for kw in retrieval_keywords if kw in task]
+    risk_hits = [kw for kw in risk_keywords if kw in task]
 
-    if any(kw in task for kw in risk_keywords):
+    if policy_hits:
+        route = "policy_tool_worker"
+        route_reason = f"policy/access keywords matched: {', '.join(policy_hits[:3])}"
+        needs_tool = True
+    elif retrieval_hits:
+        route = "retrieval_worker"
+        route_reason = f"retrieval keywords matched: {', '.join(retrieval_hits[:3])}"
+    else:
+        route = "retrieval_worker"
+        route_reason = "no policy/access keyword; default to retrieval_worker"
+
+    if risk_hits:
         risk_high = True
-        route_reason += " | risk_high flagged"
+        route_reason += f" | risk_high keywords: {', '.join(risk_hits[:3])}"
 
     # Human review override
     if risk_high and "err-" in task:
@@ -121,9 +138,10 @@ def supervisor_node(state: AgentState) -> AgentState:
         route_reason = "unknown error code + risk_high → human review"
 
     state["supervisor_route"] = route
-    state["route_reason"] = route_reason
     state["needs_tool"] = needs_tool
     state["risk_high"] = risk_high
+    route_reason += " | MCP enabled" if needs_tool else " | MCP not needed"
+    state["route_reason"] = route_reason
     state["history"].append(f"[supervisor] route={route} reason={route_reason}")
 
     return state
@@ -176,57 +194,27 @@ def human_review_node(state: AgentState) -> AgentState:
 # ─────────────────────────────────────────────
 
 # TODO Sprint 2: Uncomment sau khi implement workers
-# from workers.retrieval import run as retrieval_run
-# from workers.policy_tool import run as policy_tool_run
-# from workers.synthesis import run as synthesis_run
+from workers.retrieval import run as retrieval_run
+from workers.policy_tool import run as policy_tool_run
+from workers.synthesis import run as synthesis_run
 
 
 def retrieval_worker_node(state: AgentState) -> AgentState:
     """Wrapper gọi retrieval worker."""
     # TODO Sprint 2: Thay bằng retrieval_run(state)
-    state["workers_called"].append("retrieval_worker")
-    state["history"].append("[retrieval_worker] called")
-
-    # Placeholder output để test graph chạy được
-    state["retrieved_chunks"] = [
-        {"text": "SLA P1: phản hồi 15 phút, xử lý 4 giờ.", "source": "sla_p1_2026.txt", "score": 0.92}
-    ]
-    state["retrieved_sources"] = ["sla_p1_2026.txt"]
-    state["history"].append(f"[retrieval_worker] retrieved {len(state['retrieved_chunks'])} chunks")
-    return state
+    return retrieval_run(state)
 
 
 def policy_tool_worker_node(state: AgentState) -> AgentState:
     """Wrapper gọi policy/tool worker."""
     # TODO Sprint 2: Thay bằng policy_tool_run(state)
-    state["workers_called"].append("policy_tool_worker")
-    state["history"].append("[policy_tool_worker] called")
-
-    # Placeholder output
-    state["policy_result"] = {
-        "policy_applies": True,
-        "policy_name": "refund_policy_v4",
-        "exceptions_found": [],
-        "source": "policy_refund_v4.txt",
-    }
-    state["history"].append("[policy_tool_worker] policy check complete")
-    return state
+    return policy_tool_run(state)
 
 
 def synthesis_worker_node(state: AgentState) -> AgentState:
     """Wrapper gọi synthesis worker."""
     # TODO Sprint 2: Thay bằng synthesis_run(state)
-    state["workers_called"].append("synthesis_worker")
-    state["history"].append("[synthesis_worker] called")
-
-    # Placeholder output
-    chunks = state.get("retrieved_chunks", [])
-    sources = state.get("retrieved_sources", [])
-    state["final_answer"] = f"[PLACEHOLDER] Câu trả lời được tổng hợp từ {len(chunks)} chunks."
-    state["sources"] = sources
-    state["confidence"] = 0.75
-    state["history"].append(f"[synthesis_worker] answer generated, confidence={state['confidence']}")
-    return state
+    return synthesis_run(state)
 
 
 # ─────────────────────────────────────────────
@@ -263,6 +251,8 @@ def build_graph():
             # Policy worker may need retrieval context first
             if not state["retrieved_chunks"]:
                 state = retrieval_worker_node(state)
+                if state["retrieved_chunks"]:
+                    state = policy_tool_worker_node(state)
         else:
             # Default: retrieval_worker
             state = retrieval_worker_node(state)
@@ -302,10 +292,14 @@ def run_graph(task: str) -> AgentState:
 def save_trace(state: AgentState, output_dir: str = "./artifacts/traces") -> str:
     """Lưu trace ra file JSON."""
     os.makedirs(output_dir, exist_ok=True)
-    filename = f"{output_dir}/{state['run_id']}.json"
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-    return filename
+    filename = os.path.join(output_dir, f"{state['run_id']}.json")
+    try:
+        with open(filename, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+        return filename
+    except PermissionError as e:
+        print(f"WARNING: Could not save trace to {filename}: {e}")
+        return ""
 
 
 # ─────────────────────────────────────────────
@@ -335,6 +329,9 @@ if __name__ == "__main__":
 
         # Lưu trace
         trace_file = save_trace(result)
-        print(f"  Trace saved → {trace_file}")
+        if trace_file:
+            print(f"  Trace saved → {trace_file}")
+        else:
+            print("  Trace not saved")
 
     print("\n✅ graph.py test complete. Implement TODO sections in Sprint 1 & 2.")
