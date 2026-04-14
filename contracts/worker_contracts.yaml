@@ -229,7 +229,7 @@ synthesis_worker:
       - "Implemented in workers/synthesis.py with grounded prompt construction from retrieved_chunks, policy_result, and mcp_tools_used."
       - "Uses OpenAI chat completion when OPENAI_API_KEY is available; otherwise falls back to deterministic extractive answer generation."
       - "Builds sources from retrieved chunks, policy sources, and MCP tool outputs."
-      - "Confidence is heuristic: abstain/no evidence is low; otherwise combines top retrieval score, average retrieval score, policy-only evidence, and exception penalties."
+      - "Confidence uses LLM-as-Judge (GPT-4o, OPENAI_JUDGE_MODEL env): given the answer and evidence chunks, GPT-4o returns a float 0.00-1.00. Shortcuts: no evidence → 0.10, abstain answer → 0.25. Falls back to heuristic (cosine score weighted average) if LLM unavailable."
       - "Summarizes check_access_permission and get_ticket_info MCP outputs so access and SLA tool results are visible in the final answer context."
 
 # ─────────────────────────────────────────────
