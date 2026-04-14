@@ -76,6 +76,7 @@ def _call_llm(messages: list) -> str:
 
     return ""
 
+
 def _build_context(chunks: list, policy_result: dict, mcp_tools_used: list | None = None) -> str:
     """Xây dựng context string từ chunks và policy result."""
     parts = []
@@ -86,7 +87,8 @@ def _build_context(chunks: list, policy_result: dict, mcp_tools_used: list | Non
             source = chunk.get("source", "unknown")
             text = chunk.get("text", "")
             score = chunk.get("score", 0)
-            parts.append(f"[{i}] Nguồn: {source} (relevance: {score:.2f})\n{text}")
+            parts.append(
+                f"[{i}] Nguồn: {source} (relevance: {score:.2f})\n{text}")
 
     if policy_result and policy_result.get("exceptions_found"):
         parts.append("\n=== POLICY EXCEPTIONS ===")
@@ -100,7 +102,8 @@ def _build_context(chunks: list, policy_result: dict, mcp_tools_used: list | Non
     if mcp_tools_used:
         parts.append("\n=== MCP TOOL OUTPUTS ===")
         for call in mcp_tools_used:
-            parts.append(f"tool={call.get('tool')} output={call.get('output')} error={call.get('error')}")
+            parts.append(
+                f"tool={call.get('tool')} output={call.get('output')} error={call.get('error')}")
 
     if not parts:
         return "(Không có context)"
@@ -162,7 +165,8 @@ def _summarize_mcp_tool(call: dict) -> list:
     if tool == "get_ticket_info":
         bits = []
         if output.get("notifications_sent"):
-            bits.append("Thông báo đã gửi qua " + ", ".join(output["notifications_sent"]))
+            bits.append("Thông báo đã gửi qua " +
+                        ", ".join(output["notifications_sent"]))
         if output.get("escalated_to"):
             bits.append(f"đã escalate tới {output['escalated_to']}")
         if output.get("sla_deadline"):
@@ -219,15 +223,26 @@ def _fallback_answer(task: str, chunks: list, policy_result: dict, mcp_tools_use
     return "\n".join(f"- {line}" for line in lines[:6])
 
 
-def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> float:
-    """
-    Ước tính confidence dựa vào:
-    - Số lượng và quality của chunks
-    - Có exceptions không
-    - Answer có abstain không
+_JUDGE_SYSTEM = """Bạn là hệ thống chấm điểm độ tin cậy cho pipeline RAG nội bộ.
+Dựa vào CÂU HỎI, CÂU TRẢ LỜI của hệ thống, và các ĐOẠN BẰNG CHỨNG được truy xuất, hãy đưa ra một số thực từ 0.00 đến 1.00 thể hiện mức độ câu trả lời được hỗ trợ bởi bằng chứng.
 
-    TODO Sprint 2: Có thể dùng LLM-as-Judge để tính confidence chính xác hơn.
-    """
+Thang điểm:
+- 0.90–1.00: Mọi thông tin trong câu trả lời đều có trong bằng chứng, không suy diễn thêm.
+- 0.70–0.89: Phần lớn được hỗ trợ, cho phép suy luận nhỏ từ bằng chứng.
+- 0.50–0.69: Được hỗ trợ một phần, một số thông tin thiếu bằng chứng trực tiếp.
+- 0.30–0.49: Bằng chứng yếu hoặc thiếu nhiều.
+- 0.10–0.29: Câu trả lời mâu thuẫn với bằng chứng, từ chối trả lời, hoặc không có bằng chứng.
+
+Quy tắc:
+- Chỉ trả về MỘT số duy nhất, ví dụ: 0.82
+- Nếu câu trả lời chứa "Không đủ thông tin" hoặc "không có trong tài liệu", trả về 0.25
+- Chấm đúng điểm dựa trên mức độ hỗ trợ của bằng chứng, không phạt nặng nếu có suy luận nhỏ.
+- Nếu không có bằng chứng, trả về 0.10
+- Không giải thích."""
+
+
+def _heuristic_confidence(chunks: list, answer: str, policy_result: dict) -> float:
+    """Fallback heuristic khi LLM judge không available."""
     if not chunks:
         if policy_result and (
             policy_result.get("exceptions_found")
@@ -235,28 +250,71 @@ def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> floa
             or policy_result.get("policy_version_note")
         ):
             return 0.45
-        return 0.1  # Không có evidence → low confidence
+        return 0.10
 
     if "Không đủ thông tin" in answer or "không có trong tài liệu" in answer.lower():
-        return 0.3  # Abstain → moderate-low
+        return 0.30
 
-    # Combine top relevance and average relevance so one good chunk can carry the answer.
     scores = [float(c.get("score", 0) or 0) for c in chunks]
     avg_score = sum(scores) / len(scores)
     top_score = max(scores)
     evidence_score = (0.7 * top_score) + (0.3 * avg_score)
+    confidence = 0.2 + (0.75 * evidence_score) if evidence_score > 0 else 0.2
+    exception_penalty = 0.05 * \
+        len((policy_result or {}).get("exceptions_found", []))
+    return round(max(0.10, min(0.95, confidence - exception_penalty)), 2)
 
-    # If retrieval found chunks but the score is zero, keep it visibly low instead of hiding it.
-    if evidence_score <= 0:
-        confidence = 0.2
-    else:
-        confidence = 0.2 + (0.75 * evidence_score)
 
-    # Penalty nếu có exceptions (phức tạp hơn)
-    exception_penalty = 0.05 * len(policy_result.get("exceptions_found", []))
+def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> float:
+    """
+    LLM-as-Judge: gọi GPT-4o để đánh giá mức độ answer được support bởi evidence.
+    Fallback về heuristic nếu LLM không khả dụng.
+    """
+    # Shortcut: không cần gọi LLM khi không có evidence
+    if not chunks and not (policy_result or {}).get("exceptions_found"):
+        return 0.10
 
-    confidence = min(0.95, confidence - exception_penalty)
-    return round(max(0.1, confidence), 2)
+    try:
+        from openai import OpenAI
+        api_key = os.getenv("OPENAI_API_KEY", "")
+        if not api_key or api_key.startswith("sk-..."):
+            return _heuristic_confidence(chunks, answer, policy_result)
+
+        # Xây evidence summary gọn — chỉ lấy 3 chunks đầu, mỗi chunk tối đa 300 ký tự
+        evidence_lines = []
+        for i, c in enumerate(chunks[:3], 1):
+            text = (c.get("text") or "")[:300].replace("\n", " ")
+            src = c.get("source", "?")
+            evidence_lines.append(f"[{i}] {src}: {text}")
+        if (policy_result or {}).get("exceptions_found"):
+            for ex in policy_result["exceptions_found"]:
+                evidence_lines.append(f"[exception] {ex.get('rule', '')}")
+        evidence_str = "\n".join(
+            evidence_lines) if evidence_lines else "(none)"
+
+        user_msg = (
+            # dùng answer để judge không cần task
+            f"QUESTION: {answer[:50]}...\n\n"
+            f"ANSWER: {answer[:600]}\n\n"
+            f"EVIDENCE:\n{evidence_str}"
+        )
+
+        client = OpenAI(api_key=api_key, timeout=10)
+        resp = client.chat.completions.create(
+            model=os.getenv("OPENAI_JUDGE_MODEL", "gpt-4o"),
+            messages=[
+                {"role": "system", "content": _JUDGE_SYSTEM},
+                {"role": "user", "content": user_msg},
+            ],
+            temperature=0.0,
+            max_tokens=5,   # chỉ cần 1 số
+        )
+        raw = (resp.choices[0].message.content or "").strip()
+        score = float(raw)
+        return round(max(0.10, min(0.95, score)), 2)
+
+    except Exception:
+        return _heuristic_confidence(chunks, answer, policy_result)
 
 
 def synthesize(task: str, chunks: list, policy_result: dict, mcp_tools_used: list | None = None) -> dict:

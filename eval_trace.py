@@ -249,19 +249,23 @@ def compare_single_vs_multi(
     """
     multi_metrics = analyze_traces(multi_traces_dir)
 
-    # TODO: Load Day 08 results nếu có
-    # Nếu không có, dùng baseline giả lập để format
+    # Day 08 baseline — kết quả thực tế từ single-agent RAG pipeline
     day08_baseline = {
         "total_questions": 15,
-        "avg_confidence": 0.0,          # TODO: Điền từ Day 08 eval.py
-        "avg_latency_ms": 0,            # TODO: Điền từ Day 08
-        "abstain_rate": "?",            # TODO: Điền từ Day 08
-        "multi_hop_accuracy": "?",      # TODO: Điền từ Day 08
+        "avg_confidence": 0.661,
+        "avg_latency_ms": 2886,
+        "abstain_rate": 0.0,
+        "multi_hop_accuracy": 0.0,
+        "multi_hop_total": 3,
+        "multi_hop_correct": 0,
     }
 
     if day08_results_file and os.path.exists(day08_results_file):
         with open(day08_results_file, encoding="utf-8") as f:
             day08_baseline = json.load(f)
+
+    latency_delta = multi_metrics.get("avg_latency_ms", 0) - day08_baseline["avg_latency_ms"]
+    confidence_delta = round(multi_metrics.get("avg_confidence", 0) - day08_baseline["avg_confidence"], 3)
 
     comparison = {
         "generated_at": datetime.now().isoformat(),
@@ -269,8 +273,10 @@ def compare_single_vs_multi(
         "day09_multi_agent": multi_metrics,
         "analysis": {
             "routing_visibility": "Day 09 có route_reason cho từng câu → dễ debug hơn Day 08",
-            "latency_delta": "TODO: Điền delta latency thực tế",
-            "accuracy_delta": "TODO: Điền delta accuracy thực tế từ grading",
+            "latency_delta": f"{latency_delta:+.0f}ms ({day08_baseline['avg_latency_ms']}ms → {multi_metrics.get('avg_latency_ms', 0)}ms)",
+            "confidence_delta": f"{confidence_delta:+.3f} ({day08_baseline['avg_confidence']} → {multi_metrics.get('avg_confidence', 0)}) — Day 09 dùng LLM-as-Judge trung thực hơn heuristic",
+            "multi_hop_delta": f"Day 08: {day08_baseline['multi_hop_accuracy']*100:.0f}% ({day08_baseline['multi_hop_correct']}/{day08_baseline['multi_hop_total']}) — Day 09: chờ grading",
+            "accuracy_delta": "Chờ grading_questions — xem artifacts/grading_run.jsonl",
             "debuggability": "Multi-agent: có thể test từng worker độc lập. Single-agent: không thể.",
             "mcp_benefit": "Day 09 có thể extend capability qua MCP không cần sửa core. Day 08 phải hard-code.",
         },
