@@ -17,6 +17,13 @@ Gọi độc lập để test:
 """
 
 import os
+import re
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
 
 WORKER_NAME = "synthesis_worker"
 
@@ -39,33 +46,37 @@ def _call_llm(messages: list) -> str:
     # Option A: OpenAI
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key.startswith("sk-..."):
+            return ""
+        client = OpenAI(api_key=api_key, timeout=20)
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=os.getenv("OPENAI_MODEL", "gpt-4o"),
             messages=messages,
             temperature=0.1,  # Low temperature để grounded
             max_tokens=500,
         )
-        return response.choices[0].message.content
+        return response.choices[0].message.content or ""
     except Exception:
         pass
 
     # Option B: Gemini
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        combined = "\n".join([m["content"] for m in messages])
-        response = model.generate_content(combined)
-        return response.text
-    except Exception:
-        pass
+    # try:
+    #     import google.generativeai as genai
+    #     api_key = os.getenv("GOOGLE_API_KEY")
+    #     if not api_key:
+    #         return ""
+    #     genai.configure(api_key=api_key)
+    #     model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+    #     combined = "\n".join([m["content"] for m in messages])
+    #     response = model.generate_content(combined)
+    #     return response.text or ""
+    # except Exception:
+    #     pass
 
-    # Fallback: trả về message báo lỗi (không hallucinate)
-    return "[SYNTHESIS ERROR] Không thể gọi LLM. Kiểm tra API key trong .env."
+    return ""
 
-
-def _build_context(chunks: list, policy_result: dict) -> str:
+def _build_context(chunks: list, policy_result: dict, mcp_tools_used: list | None = None) -> str:
     """Xây dựng context string từ chunks và policy result."""
     parts = []
 
@@ -82,10 +93,130 @@ def _build_context(chunks: list, policy_result: dict) -> str:
         for ex in policy_result["exceptions_found"]:
             parts.append(f"- {ex.get('rule', '')}")
 
+    if policy_result and policy_result.get("policy_version_note"):
+        parts.append("\n=== POLICY VERSION NOTE ===")
+        parts.append(policy_result["policy_version_note"])
+
+    if mcp_tools_used:
+        parts.append("\n=== MCP TOOL OUTPUTS ===")
+        for call in mcp_tools_used:
+            parts.append(f"tool={call.get('tool')} output={call.get('output')} error={call.get('error')}")
+
     if not parts:
         return "(Không có context)"
 
     return "\n\n".join(parts)
+
+
+def _source_list(chunks: list, policy_result: dict, mcp_tools_used: list | None = None) -> list:
+    sources = []
+    for chunk in chunks:
+        source = chunk.get("source")
+        if source and source not in sources:
+            sources.append(source)
+
+    policy_sources = policy_result.get("source", []) if policy_result else []
+    if isinstance(policy_sources, str):
+        policy_sources = [policy_sources]
+    for source in policy_sources:
+        if source and source not in sources:
+            sources.append(source)
+
+    for call in mcp_tools_used or []:
+        output = call.get("output") or {}
+        source = output.get("source")
+        if source and source not in sources:
+            sources.append(source)
+        for source in output.get("sources", []) or []:
+            if source and source not in sources:
+                sources.append(source)
+
+    return sources
+
+
+def _extract_relevant_lines(text: str, query: str, limit: int = 4) -> list:
+    query_terms = {
+        token
+        for token in re.findall(r"\w+", query.lower(), flags=re.UNICODE)
+        if len(token) > 2
+    }
+    lines = [line.strip("- \t") for line in text.splitlines() if line.strip()]
+    scored = []
+    for line in lines:
+        line_terms = set(re.findall(r"\w+", line.lower(), flags=re.UNICODE))
+        score = len(query_terms & line_terms)
+        if score:
+            scored.append((score, line))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    selected = [line for _, line in scored[:limit]]
+    return selected or lines[:limit]
+
+
+def _summarize_mcp_tool(call: dict) -> list:
+    tool = call.get("tool", "")
+    output = call.get("output") or {}
+    if call.get("error"):
+        error = call["error"]
+        return [f"MCP {tool} lỗi: {error.get('reason', error)}."]
+
+    if tool == "get_ticket_info":
+        bits = []
+        if output.get("notifications_sent"):
+            bits.append("Thông báo đã gửi qua " + ", ".join(output["notifications_sent"]))
+        if output.get("escalated_to"):
+            bits.append(f"đã escalate tới {output['escalated_to']}")
+        if output.get("sla_deadline"):
+            bits.append(f"SLA deadline: {output['sla_deadline']}")
+        return [". ".join(bits) + "."] if bits else []
+
+    if tool == "check_access_permission":
+        bits = [
+            f"Level {output.get('access_level')} cần approvers: {', '.join(output.get('required_approvers', []))}",
+            f"emergency_override={output.get('emergency_override')}",
+        ]
+        bits.extend(output.get("notes", []) or [])
+        return ["; ".join(str(bit) for bit in bits if bit) + "."]
+
+    return []
+
+
+def _fallback_answer(task: str, chunks: list, policy_result: dict, mcp_tools_used: list | None = None) -> str:
+    sources = _source_list(chunks, policy_result, mcp_tools_used)
+    primary_source = sources[0] if sources else "tài liệu nội bộ"
+
+    if not chunks and not policy_result and not mcp_tools_used:
+        return "Không đủ thông tin trong tài liệu nội bộ để trả lời câu hỏi này."
+
+    lines = []
+    policy_version_note = (policy_result or {}).get("policy_version_note")
+    if policy_version_note:
+        lines.append(f"{policy_version_note} [{primary_source}]")
+
+    exceptions = (policy_result or {}).get("exceptions_found", [])
+    for ex in exceptions:
+        rule = ex.get("rule")
+        source = ex.get("source") or primary_source
+        if rule:
+            lines.append(f"Ngoại lệ áp dụng: {rule} [{source}]")
+
+    for call in mcp_tools_used or []:
+        source = (call.get("output") or {}).get("source") or primary_source
+        for item in _summarize_mcp_tool(call):
+            lines.append(f"{item} [{source}]")
+
+    for chunk in chunks[:2]:
+        source = chunk.get("source", primary_source)
+        for line in _extract_relevant_lines(chunk.get("text", ""), task, limit=3):
+            entry = f"{line} [{source}]"
+            if line and entry not in lines:
+                lines.append(entry)
+        if len(lines) >= 6:
+            break
+
+    if not lines:
+        return "Không đủ thông tin trong tài liệu nội bộ để trả lời câu hỏi này."
+
+    return "\n".join(f"- {line}" for line in lines[:6])
 
 
 def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> float:
@@ -116,14 +247,14 @@ def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> floa
     return round(max(0.1, confidence), 2)
 
 
-def synthesize(task: str, chunks: list, policy_result: dict) -> dict:
+def synthesize(task: str, chunks: list, policy_result: dict, mcp_tools_used: list | None = None) -> dict:
     """
     Tổng hợp câu trả lời từ chunks và policy context.
 
     Returns:
         {"answer": str, "sources": list, "confidence": float}
     """
-    context = _build_context(chunks, policy_result)
+    context = _build_context(chunks, policy_result, mcp_tools_used)
 
     # Build messages
     messages = [
@@ -139,7 +270,9 @@ Hãy trả lời câu hỏi dựa vào tài liệu trên."""
     ]
 
     answer = _call_llm(messages)
-    sources = list({c.get("source", "unknown") for c in chunks})
+    if not answer:
+        answer = _fallback_answer(task, chunks, policy_result, mcp_tools_used)
+    sources = _source_list(chunks, policy_result, mcp_tools_used)
     confidence = _estimate_confidence(chunks, answer, policy_result)
 
     return {
@@ -156,6 +289,7 @@ def run(state: dict) -> dict:
     task = state.get("task", "")
     chunks = state.get("retrieved_chunks", [])
     policy_result = state.get("policy_result", {})
+    mcp_tools_used = state.get("mcp_tools_used", [])
 
     state.setdefault("workers_called", [])
     state.setdefault("history", [])
@@ -167,13 +301,14 @@ def run(state: dict) -> dict:
             "task": task,
             "chunks_count": len(chunks),
             "has_policy": bool(policy_result),
+            "mcp_calls": len(mcp_tools_used),
         },
         "output": None,
         "error": None,
     }
 
     try:
-        result = synthesize(task, chunks, policy_result)
+        result = synthesize(task, chunks, policy_result, mcp_tools_used)
         state["final_answer"] = result["answer"]
         state["sources"] = result["sources"]
         state["confidence"] = result["confidence"]
