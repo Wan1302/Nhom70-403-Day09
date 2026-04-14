@@ -76,9 +76,12 @@
 **Worker được chọn:** `policy_tool_worker`  
 **Route reason:** `policy/access keywords matched: access, level 2, contractor | risk_high keywords: emergency, 2am | MCP enabled`
 
+**MCP tools được gọi:** `search_kb`, `get_ticket_info`
+**Workers called sequence:** `policy_tool_worker` → `synthesis_worker`
+
 **Nhận xét: Đây là trường hợp routing khó nhất trong lab. Tại sao?**
 
-Task này span qua **hai domain** cùng lúc: (1) cấp quyền khẩn cấp cho contractor (→ access_control_sop.txt) và (2) notify stakeholder theo SLA P1 (→ sla_p1_2026.txt). Supervisor route sang `policy_tool_worker` vì phát hiện `access`, `level 2`, `contractor` trong policy_keywords — và đúng vì cấp quyền là phần cần policy check. Tuy nhiên SLA notification lại thuộc retrieval domain. Multi-hop câu hỏi như thế này lý tưởng phải gọi cả 2 worker, nhưng kiến trúc hiện tại chỉ route sang 1 worker. Kết quả confidence chỉ 0.69 dù MCP đã gọi `search_kb`. Đây là giới hạn của keyword-based routing khi task có nhiều intent.
+Task này span qua **hai domain** cùng lúc: (1) cấp quyền khẩn cấp cho contractor (→ access_control_sop.txt) và (2) notify stakeholder theo SLA P1 (→ sla_p1_2026.txt). Supervisor route sang `policy_tool_worker` vì phát hiện `access`, `level 2`, `contractor` trong policy_keywords — và đây là route hợp lý vì phần access cần policy check. Điểm quan trọng là `policy_tool_worker` không chỉ dùng context access, mà còn gọi MCP `search_kb` và `get_ticket_info`, nên answer cuối cùng nêu đủ cả 2 phần: Slack + email + PagerDuty cho P1 notification, và Level 2 emergency access cần On-call IT Admin + Tech Lead verbal approval, tối đa 24h, ghi Security Audit log. Vì vậy gq09 đủ điều kiện self-review Full (16/16) dù trace vẫn chỉ có 1 worker nghiệp vụ.
 
 ---
 
@@ -110,7 +113,7 @@ Task này span qua **hai domain** cùng lúc: (1) cấp quyền khẩn cấp cho
 ### Lesson Learned về Routing
 
 1. **Keyword matching đủ tốt cho câu đơn intent**: 85–90% các câu trong test set chỉ thuộc 1 domain rõ ràng, keyword matching đơn giản hoạt động tốt và nhanh hơn LLM classifier.
-2. **Multi-hop task cần sequential workers**: Câu hỏi span nhiều domain (vừa cần SLA vừa cần access policy) không giải quyết được tốt với single-route architecture. Cần cân nhắc orchestration pattern cho phép gọi nhiều worker tuần tự.
+2. **Multi-hop task nên có sequential workers**: gq09 vẫn trả lời đủ nhờ MCP context, nhưng câu hỏi span nhiều domain (vừa cần SLA vừa cần access policy) sẽ ổn định hơn nếu orchestration cho phép gọi nhiều worker tuần tự và ghi rõ 2 worker trong trace.
 
 ### Route Reason Quality
 

@@ -69,7 +69,7 @@ User Request (task: str)
     ▼                          ▼
 retrieval_worker         policy_tool_worker
 (workers/retrieval.py)   (workers/policy_tool.py)
-- ChromaDB top-k=3       - gọi MCP search_kb
+- ChromaDB top-k=3       - gọi MCP tools
 - all-MiniLM-L6-v2       - LLM policy check
 - cosine similarity      - detect exceptions
     │                          │
@@ -128,7 +128,7 @@ policy_tool_worker ──MCP call──► mcp_server.dispatch_tool()
 | Thuộc tính | Mô tả |
 |-----------|-------|
 | **Nhiệm vụ** | Kiểm tra policy áp dụng, phát hiện exception case, gọi MCP tools khi `needs_tool=True` |
-| **MCP tools gọi** | `search_kb` (chính), `check_access_permission` (khi liên quan access level) |
+| **MCP tools gọi** | `search_kb` (chính), `get_ticket_info` (ticket/P1), `check_access_permission` (access level), `create_ticket` (mock ticket creation) |
 | **Exception cases xử lý** | Flash Sale (không hoàn tiền), Digital Product/license key (không hoàn tiền), Emergency access (cấp tạm thời 24h với Tech Lead approval) |
 | **LLM** | GPT-4o-mini cho policy analysis (cost-efficient) |
 
@@ -187,7 +187,7 @@ policy_tool_worker ──MCP call──► mcp_server.dispatch_tool()
 | Routing visibility | Không có | Có `route_reason` trong mỗi trace |
 | Multi-hop | Một lần retrieve tất cả | MCP `search_kb` bổ sung thêm context theo domain |
 | Cost | 1 LLM call/query | 2–3 LLM calls/query + MCP calls |
-| Latency | ~2,886ms avg | ~3,531ms avg (+22%) |
+| Latency | ~2,886ms avg | ~4,749ms avg (+1,863ms / +65%) |
 
 **Quan sát từ thực tế lab:**
 
@@ -199,6 +199,6 @@ policy_tool_worker ──MCP call──► mcp_server.dispatch_tool()
 
 ## 6. Giới hạn và điểm cần cải tiến
 
-1. **Single-route architecture**: Supervisor chỉ route sang 1 worker. Câu hỏi multi-intent (vừa cần SLA vừa cần access policy) không được xử lý đầy đủ — cần sequential chaining.
+1. **Single-route architecture**: Supervisor chỉ route sang 1 worker. gq09 vẫn được xử lý đủ nhờ MCP `search_kb` + `get_ticket_info`, nhưng câu hỏi multi-intent (vừa cần SLA vừa cần access policy) sẽ ổn định hơn nếu có sequential chaining và trace ghi rõ nhiều worker.
 2. **Keyword matching brittle**: Nếu user dùng từ khác (VD: "quyền admin" thay vì "access level 4"), routing có thể sai. Cần LLM-based intent classifier hoặc fuzzy matching.
 3. **Abstain chưa implement**: Cả hai pipeline không có khả năng trả về "không đủ thông tin". Synthesis luôn generate answer dù confidence thấp — tiềm ẩn hallucination risk.
