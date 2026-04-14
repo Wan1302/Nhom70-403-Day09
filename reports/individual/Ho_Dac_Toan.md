@@ -33,7 +33,7 @@
 
 `policy_tool_worker` là trung gian giữa retrieval (thành viên khác) và synthesis. Tôi đọc `retrieved_chunks` từ state, gọi `dispatch_tool()` trong `mcp_server.py` nếu cần bổ sung context, rồi ghi `policy_result` để `synthesis_worker` dùng. Cụ thể: `tool_search_kb()` trong `mcp_server.py` import `workers.retrieval.retrieve_dense` — nên phần MCP phụ thuộc vào retrieval worker đã build đúng ChromaDB index.
 
-**Bằng chứng:** `workers/policy_tool.py` dòng 43 — `from mcp_server import dispatch_tool`. File `artifacts/grading_run.jsonl` ghi `"mcp_tools_used": ["search_kb"]` cho các câu gq02, gq03, gq09, gq10, xác nhận MCP được gọi qua code tôi viết.
+**Bằng chứng:** `workers/policy_tool.py` import `dispatch_tool` từ `mcp_server.py`. File `artifacts/grading_run.jsonl` ghi `mcp_tools_used` cho các câu gq02, gq03, gq04, gq09, gq10; riêng gq09 dùng cả `search_kb` và `get_ticket_info`, xác nhận MCP được gọi qua code tôi viết.
 
 ---
 
