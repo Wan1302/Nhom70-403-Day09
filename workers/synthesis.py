@@ -229,21 +229,33 @@ def _estimate_confidence(chunks: list, answer: str, policy_result: dict) -> floa
     TODO Sprint 2: Có thể dùng LLM-as-Judge để tính confidence chính xác hơn.
     """
     if not chunks:
+        if policy_result and (
+            policy_result.get("exceptions_found")
+            or policy_result.get("policy_applies") is not None
+            or policy_result.get("policy_version_note")
+        ):
+            return 0.45
         return 0.1  # Không có evidence → low confidence
 
     if "Không đủ thông tin" in answer or "không có trong tài liệu" in answer.lower():
         return 0.3  # Abstain → moderate-low
 
-    # Weighted average của chunk scores
-    if chunks:
-        avg_score = sum(c.get("score", 0) for c in chunks) / len(chunks)
+    # Combine top relevance and average relevance so one good chunk can carry the answer.
+    scores = [float(c.get("score", 0) or 0) for c in chunks]
+    avg_score = sum(scores) / len(scores)
+    top_score = max(scores)
+    evidence_score = (0.7 * top_score) + (0.3 * avg_score)
+
+    # If retrieval found chunks but the score is zero, keep it visibly low instead of hiding it.
+    if evidence_score <= 0:
+        confidence = 0.2
     else:
-        avg_score = 0
+        confidence = 0.2 + (0.75 * evidence_score)
 
     # Penalty nếu có exceptions (phức tạp hơn)
     exception_penalty = 0.05 * len(policy_result.get("exceptions_found", []))
 
-    confidence = min(0.95, avg_score - exception_penalty)
+    confidence = min(0.95, confidence - exception_penalty)
     return round(max(0.1, confidence), 2)
 
 

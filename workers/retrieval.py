@@ -38,6 +38,7 @@ except Exception:
 
 CHROMA_DB_PATH = os.getenv("CHROMA_DB_PATH", str(REPO_ROOT / "chroma_db"))
 CHROMA_COLLECTION = os.getenv("CHROMA_COLLECTION", "day09_docs")
+CHROMA_SPACE = os.getenv("CHROMA_SPACE")
 
 _EMBEDDING_FN = None
 
@@ -82,6 +83,26 @@ def _get_collection(embed=None):
     return collection
 
 
+def _collection_space(collection) -> str:
+    """Trả về metric của Chroma collection để convert distance đúng."""
+    metadata = getattr(collection, "metadata", None) or {}
+    return (metadata.get("hnsw:space") or CHROMA_SPACE or "l2").lower()
+
+
+def _distance_to_score(distance: float, space: str) -> float:
+    """Convert Chroma distance thành relevance score trong khoảng 0..1."""
+    if space == "cosine":
+        # Chroma cosine distance thường là 1 - cosine_similarity.
+        return max(0.0, min(1.0, 1.0 - distance))
+    if space == "l2":
+        # L2 distance không nằm trong [0, 1], nên dùng hàm giảm đơn điệu.
+        return 1.0 / (1.0 + max(distance, 0.0))
+    if space == "ip":
+        # Inner-product distance trong Chroma cũng là distance càng nhỏ càng gần.
+        return max(0.0, min(1.0, 1.0 - distance))
+    return max(0.0, min(1.0, 1.0 - distance))
+
+
 def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
     """
     Dense retrieval: embed query → query ChromaDB → trả về top_k chunks.
@@ -102,6 +123,7 @@ def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
         embed = _get_embedding_fn()
         query_embedding = embed(query)
         collection = _get_collection(embed=embed)
+        distance_metric = _collection_space(collection)
         results = collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
@@ -115,11 +137,15 @@ def retrieve_dense(query: str, top_k: int = DEFAULT_TOP_K) -> list:
 
         for doc, dist, meta in zip(documents, distances, metadatas):
             meta = meta or {}
-            score = max(0.0, min(1.0, 1 - float(dist)))
+            distance = float(dist)
+            score = _distance_to_score(distance, distance_metric)
+            meta = dict(meta)
+            meta["distance"] = round(distance, 4)
+            meta["distance_metric"] = distance_metric
             chunks.append({
                 "text": doc,
                 "source": meta.get("source", "unknown"),
-                "score": round(score, 4),  # cosine similarity
+                "score": round(score, 4),
                 "metadata": meta,
             })
         if chunks:
@@ -165,10 +191,17 @@ def run(state: dict) -> dict:
 
         state["retrieved_chunks"] = chunks
         state["retrieved_sources"] = sources
+        scores = [c.get("score", 0) for c in chunks]
+        distance_metrics = list(dict.fromkeys(
+            c.get("metadata", {}).get("distance_metric") for c in chunks
+            if c.get("metadata", {}).get("distance_metric")
+        ))
 
         worker_io["output"] = {
             "chunks_count": len(chunks),
             "sources": sources,
+            "score_range": [min(scores), max(scores)] if scores else [],
+            "distance_metrics": distance_metrics,
         }
         state["history"].append(
             f"[{WORKER_NAME}] retrieved {len(chunks)} chunks from {sources}"
