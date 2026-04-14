@@ -1,0 +1,114 @@
+{
+  "task": "ERR-403-AUTH là lỗi gì và cách xử lý?",
+  "route_reason": "unknown error code + risk_high → human review | MCP not needed | human approved → retrieval",
+  "risk_high": true,
+  "needs_tool": false,
+  "hitl_triggered": true,
+  "retrieved_chunks": [
+    {
+      "text": "Ngoại lệ không được hoàn tiền:\n- Sản phẩm thuộc danh mục hàng kỹ thuật số (license key, subscription).\n- Đơn hàng đã áp dụng mã giảm giá đặc biệt theo chương trình khuyến mãi Flash Sale.\n- Sản phẩm đã được kích hoạt hoặc đăng ký tài khoản.\n\n=== Điều 4: Quy trình xử lý yêu cầu hoàn tiền ===\nBước 1: Khách hàng gửi yêu cầu qua hệ thống ticket nội bộ với category \"Refund Request\".\nBước 2: CS Agent xem xét trong vòng 1 ngày làm việc và xác nhận điều kiện đủ điều kiện.\nBước 3: Nếu đủ điều kiện, chuyển yêu cầu sang Finance Team để xử lý hoàn tiền.\nBước 4: Finance Team xử lý trong 3-5 ngày làm việc và thông báo kết quả cho khách hàng.\n\n=== Điều 5: Hình thức hoàn tiền ===\n- Hoàn tiền qua phương thức thanh toán gốc: áp dụng trong 100% trường hợp đủ điều kiện.\n- Hoàn tiền qua credit nội bộ (store credit): khách hàng có thể chọn nhận store credit thay thế với giá trị 110% so với số tiền hoàn.",
+      "source": "policy_refund_v4.txt",
+      "score": 0.4101,
+      "metadata": {
+        "chunk_index": 2,
+        "source": "policy_refund_v4.txt",
+        "distance": 0.5899,
+        "distance_metric": "cosine"
+      }
+    },
+    {
+      "text": "CHÍNH SÁCH HOÀN TIỀN - PHIÊN BẢN 4\nSource: policy/refund-v4.pdf\nDepartment: CS\nEffective Date: 2026-02-01\nAccess: internal\n\n=== Điều 1: Phạm vi áp dụng ===\nChính sách này áp dụng cho tất cả các đơn hàng được đặt trên hệ thống nội bộ kể từ ngày 01/02/2026.\nCác đơn hàng đặt trước ngày có hiệu lực sẽ áp dụng theo chính sách hoàn tiền phiên bản 3.\n\n=== Điều 2: Điều kiện được hoàn tiền ===\nKhách hàng được quyền yêu cầu hoàn tiền khi đáp ứng đủ các điều kiện sau:\n- Sản phẩm bị lỗi do nhà sản xuất, không phải do người dùng.\n- Yêu cầu được gửi trong vòng 7 ngày làm việc kể từ thời điểm xác nhận đơn hàng.\n- Đơn hàng chưa được sử dụng hoặc chưa bị mở seal.\n\n=== Điều 3: Điều kiện áp dụng và ngoại lệ ===\nHoàn tiền — Điều kiện áp dụng:\nYêu cầu được gửi trong vòng 7 ngày kể từ thời điểm xác nhận đơn hàng.",
+      "source": "policy_refund_v4.txt",
+      "score": 0.4018,
+      "metadata": {
+        "chunk_index": 1,
+        "source": "policy_refund_v4.txt",
+        "distance": 0.5982,
+        "distance_metric": "cosine"
+      }
+    },
+    {
+      "text": "QUY TRÌNH KIỂM SOÁT TRUY CẬP HỆ THỐNG (ACCESS CONTROL SOP)\nSource: it/access-control-sop.md\nDepartment: IT Security\nEffective Date: 2026-01-01\nAccess: internal\n\nGhi chú: Tài liệu này trước đây có tên \"Approval Matrix for System Access\".\n\n=== Section 1: Phạm vi và mục đích ===\nTài liệu này quy định quy trình cấp phép truy cập vào các hệ thống nội bộ của công ty.\nÁp dụng cho tất cả nhân viên, contractor, và third-party vendor.\n\n=== Section 2: Phân cấp quyền truy cập ===\n\nLevel 1 — Read Only:\nÁp dụng cho: Tất cả nhân viên mới trong 30 ngày đầu.\nPhê duyệt: Line Manager.\nThời gian xử lý: 1 ngày làm việc.\n\nLevel 2 — Standard Access:\nÁp dụng cho: Nhân viên chính thức đã qua thử việc.\nPhê duyệt: Line Manager + IT Admin.\nThời gian xử lý: 2 ngày làm việc.",
+      "source": "access_control_sop.txt",
+      "score": 0.3854,
+      "metadata": {
+        "source": "access_control_sop.txt",
+        "chunk_index": 1,
+        "distance": 0.6146,
+        "distance_metric": "cosine"
+      }
+    }
+  ],
+  "retrieved_sources": [
+    "policy_refund_v4.txt",
+    "access_control_sop.txt"
+  ],
+  "policy_result": {},
+  "mcp_tools_used": [],
+  "final_answer": "Không đủ thông tin trong tài liệu nội bộ.",
+  "sources": [
+    "policy_refund_v4.txt",
+    "access_control_sop.txt"
+  ],
+  "confidence": 0.25,
+  "history": [
+    "[supervisor] received task: ERR-403-AUTH là lỗi gì và cách xử lý?",
+    "[supervisor] route=human_review reason=unknown error code + risk_high → human review | MCP not needed",
+    "[human_review] HITL triggered — awaiting human input",
+    "[retrieval_worker] retrieved 3 chunks from ['policy_refund_v4.txt', 'access_control_sop.txt']",
+    "[synthesis_worker] answer generated, confidence=0.25, sources=['policy_refund_v4.txt', 'access_control_sop.txt']",
+    "[graph] completed in 2700ms"
+  ],
+  "workers_called": [
+    "human_review",
+    "retrieval_worker",
+    "synthesis_worker"
+  ],
+  "worker_io_logs": [
+    {
+      "worker": "retrieval_worker",
+      "input": {
+        "task": "ERR-403-AUTH là lỗi gì và cách xử lý?",
+        "top_k": 3
+      },
+      "output": {
+        "chunks_count": 3,
+        "sources": [
+          "policy_refund_v4.txt",
+          "access_control_sop.txt"
+        ],
+        "score_range": [
+          0.3854,
+          0.4101
+        ],
+        "distance_metrics": [
+          "cosine"
+        ]
+      },
+      "error": null
+    },
+    {
+      "worker": "synthesis_worker",
+      "input": {
+        "task": "ERR-403-AUTH là lỗi gì và cách xử lý?",
+        "chunks_count": 3,
+        "has_policy": false,
+        "mcp_calls": 0
+      },
+      "output": {
+        "answer_length": 41,
+        "sources": [
+          "policy_refund_v4.txt",
+          "access_control_sop.txt"
+        ],
+        "confidence": 0.25
+      },
+      "error": null
+    }
+  ],
+  "supervisor_route": "retrieval_worker",
+  "latency_ms": 2700,
+  "run_id": "run_20260414_170700_500342",
+  "start_time": 1776161220.5003421,
+  "question_id": "q09"
+}

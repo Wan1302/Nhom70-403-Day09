@@ -1,0 +1,116 @@
+{
+  "task": "Nhân viên được làm remote tối đa mấy ngày mỗi tuần?",
+  "route_reason": "retrieval keywords matched: remote | MCP not needed",
+  "risk_high": false,
+  "needs_tool": false,
+  "hitl_triggered": false,
+  "retrieved_chunks": [
+    {
+      "text": "4.1 Điều kiện remote:\n- Nhân viên sau probation period có thể làm remote tối đa 2 ngày/tuần.\n- Team Lead phải phê duyệt lịch remote qua HR Portal.\n- Ngày onsite bắt buộc: Thứ 3 và Thứ 5 theo lịch team.\n\n4.2 Yêu cầu kỹ thuật khi remote:\n- Kết nối VPN bắt buộc khi làm việc với hệ thống nội bộ.\n- Camera bật trong các cuộc họp team.\n\n=== Phần 5: Liên hệ HR ===\nEmail: hr@company.internal\nHotline: ext. 2000\nHR Portal: https://hr.company.internal\nGiờ làm việc: Thứ 2 - Thứ 6, 8:30 - 17:30",
+      "source": "hr_leave_policy.txt",
+      "score": 0.6455,
+      "metadata": {
+        "chunk_index": 3,
+        "source": "hr_leave_policy.txt",
+        "distance": 0.3545,
+        "distance_metric": "cosine"
+      }
+    },
+    {
+      "text": "=== Điều 6: Liên hệ và hỗ trợ ===\nEmail: cs-refund@company.internal\nHotline nội bộ: ext. 1234\nGiờ làm việc: Thứ 2 - Thứ 6, 8:00 - 17:30",
+      "source": "policy_refund_v4.txt",
+      "score": 0.5735,
+      "metadata": {
+        "chunk_index": 3,
+        "source": "policy_refund_v4.txt",
+        "distance": 0.4265,
+        "distance_metric": "cosine"
+      }
+    },
+    {
+      "text": "Q: Tôi bị mất kết nối VPN liên tục, phải làm gì?\nA: Kiểm tra kết nối Internet trước. Nếu vẫn lỗi, tạo ticket P3 với log file VPN đính kèm.\n\nQ: VPN có giới hạn số thiết bị không?\nA: Mỗi tài khoản được kết nối VPN trên tối đa 2 thiết bị cùng lúc.\n\n=== Section 3: Phần mềm và license ===\n\nQ: Tôi cần cài phần mềm mới, phải làm gì?\nA: Gửi yêu cầu qua Jira project IT-SOFTWARE. Line Manager phải phê duyệt trước khi IT cài đặt.\n\nQ: Ai chịu trách nhiệm gia hạn license phần mềm?\nA: IT Procurement team quản lý tất cả license. Nhắc nhở sẽ được gửi 30 ngày trước khi hết hạn.\n\n=== Section 4: Thiết bị và phần cứng ===\n\nQ: Laptop mới được cấp sau bao lâu khi vào công ty?\nA: Laptop được cấp trong ngày onboarding đầu tiên. Nếu có vấn đề, liên hệ HR hoặc IT Admin.\n\nQ: Laptop bị hỏng phải báo cáo như thế nào?\nA: Tạo ticket P2 hoặc P3 tùy mức độ nghiêm trọng. Mang thiết bị đến IT Room (tầng 3) để kiểm tra.",
+      "source": "it_helpdesk_faq.txt",
+      "score": 0.5599,
+      "metadata": {
+        "source": "it_helpdesk_faq.txt",
+        "chunk_index": 2,
+        "distance": 0.4401,
+        "distance_metric": "cosine"
+      }
+    }
+  ],
+  "retrieved_sources": [
+    "hr_leave_policy.txt",
+    "policy_refund_v4.txt",
+    "it_helpdesk_faq.txt"
+  ],
+  "policy_result": {},
+  "mcp_tools_used": [],
+  "final_answer": "Nhân viên được làm remote tối đa 2 ngày mỗi tuần sau khi hoàn thành probation period [hr_leave_policy.txt].",
+  "sources": [
+    "hr_leave_policy.txt",
+    "policy_refund_v4.txt",
+    "it_helpdesk_faq.txt"
+  ],
+  "confidence": 0.9,
+  "history": [
+    "[supervisor] received task: Nhân viên được làm remote tối đa mấy ngày mỗi tuần?",
+    "[supervisor] route=retrieval_worker reason=retrieval keywords matched: remote | MCP not needed",
+    "[retrieval_worker] retrieved 3 chunks from ['hr_leave_policy.txt', 'policy_refund_v4.txt', 'it_helpdesk_faq.txt']",
+    "[synthesis_worker] answer generated, confidence=0.9, sources=['hr_leave_policy.txt', 'policy_refund_v4.txt', 'it_helpdesk_faq.txt']",
+    "[graph] completed in 2236ms"
+  ],
+  "workers_called": [
+    "retrieval_worker",
+    "synthesis_worker"
+  ],
+  "worker_io_logs": [
+    {
+      "worker": "retrieval_worker",
+      "input": {
+        "task": "Nhân viên được làm remote tối đa mấy ngày mỗi tuần?",
+        "top_k": 3
+      },
+      "output": {
+        "chunks_count": 3,
+        "sources": [
+          "hr_leave_policy.txt",
+          "policy_refund_v4.txt",
+          "it_helpdesk_faq.txt"
+        ],
+        "score_range": [
+          0.5599,
+          0.6455
+        ],
+        "distance_metrics": [
+          "cosine"
+        ]
+      },
+      "error": null
+    },
+    {
+      "worker": "synthesis_worker",
+      "input": {
+        "task": "Nhân viên được làm remote tối đa mấy ngày mỗi tuần?",
+        "chunks_count": 3,
+        "has_policy": false,
+        "mcp_calls": 0
+      },
+      "output": {
+        "answer_length": 107,
+        "sources": [
+          "hr_leave_policy.txt",
+          "policy_refund_v4.txt",
+          "it_helpdesk_faq.txt"
+        ],
+        "confidence": 0.9
+      },
+      "error": null
+    }
+  ],
+  "supervisor_route": "retrieval_worker",
+  "latency_ms": 2236,
+  "run_id": "run_20260414_170647_644936",
+  "start_time": 1776161207.6459374,
+  "question_id": "q05"
+}
